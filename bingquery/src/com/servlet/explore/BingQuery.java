@@ -6,6 +6,10 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.URL;
 import java.net.URLConnection;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.Scanner;
 
 //Download and add this library to the build path.
@@ -17,11 +21,18 @@ public class BingQuery {
 	private String query; 
 	private static String accountKey = "PJD4UwjOC50tzY6BN95L7ftRuQ5EMavSK14aCsiiEjc=";
 	private String bingUrl;
+	private ArrayList<String> relDoc;
+	private ArrayList<String> nonRelDoc;
+	private HashMap<String, Double> q_vect;
+	private HashMap<String, Integer> invListRel;
+	private HashMap<String, Integer> invListNonRel;
+	private static final double BETA = 0.75;
+	private static final double GAMMA = 0.25;
 
 	public static void main(String[] args) throws IOException {
 
 		double precision = 0.7;
-		String query = "gates";
+		String query = "snow leopard";
 
 		if(args.length > 0)
 			accountKey = args[0];
@@ -38,6 +49,11 @@ public class BingQuery {
 		this.precision = precision;
 		this.query = query;
 		this.bingUrl = "https://api.datamarket.azure.com/Data.ashx/Bing/SearchWeb/v1/Web?Query=%27"+formatQuery(query)+"%27&$top=10&$format=JSON";
+		this.relDoc = new ArrayList<String>();
+		this.nonRelDoc = new ArrayList<String>();
+		this.q_vect = new HashMap<String, Double>();
+		this.invListRel = new HashMap<String, Integer>();
+		this.invListNonRel = new HashMap<String, Integer>();
 	}
 
 	private String formatQuery(String query2) {
@@ -54,6 +70,7 @@ public class BingQuery {
 	}
 
 	public void startQuery() {
+		// addQueryTerms();
 		printHeader();
 		retrieveResults();		
 	}
@@ -68,7 +85,6 @@ public class BingQuery {
 	}
 
 	public void retrieveResults() {
-
 		try {
 			byte[] accountKeyBytes = Base64.encodeBase64((accountKey + ":" + accountKey).getBytes());
 			String accountKeyEnc = new String(accountKeyBytes);
@@ -121,10 +137,13 @@ public class BingQuery {
 				while(!answered) {
 					if(relevant.equalsIgnoreCase("n")) {
 						answered = true;
+						nonRelDoc.add(resultObject.get("Title").toString());
 						no++;
 					}						
-					else if(relevant.equalsIgnoreCase("y")) 
+					else if(relevant.equalsIgnoreCase("y")) {
+						relDoc.add(resultObject.get("Title").toString());
 						answered = true;
+					}
 					else {
 						System.out.println("Invalid input. Only type y or n.");
 						relevant = sc.next();
@@ -168,9 +187,157 @@ public class BingQuery {
 		this.bingUrl = "https://api.datamarket.azure.com/Data.ashx/Bing/SearchWeb/v1/Web?Query=%27"+formatQuery(query)+"%27&$top=10&$format=JSON";
 	}
 
-	private String augmentQueryWith() {
+	/*	private void addQueryTerms() {
+		for(String s : query.split(" ")) {
+			s = s.toLowerCase().trim().replaceAll("[^\\p{L}\\p{N}]", "");
+			if(!s.equals("")) { //and not one of the stop words
+				q_vect.put(s, 0.0);
+			}
+		}	
+	} */
 
-		return "temp";
+	private String augmentQueryWith() {
+		addTermsToQVect();
+		computeWeightsForOriginalQuery();
+		computeWeightsForQvect();
+		String[] topTerms = findTopKterms();	
+		String augment = "";
+		int j = 0; 
+		for(int i = 0; i < topTerms.length - 1; i++) {
+			if(!alreadyQuery(topTerms[i]) && j < 2) {
+				augment += topTerms[i] + " ";
+				j++;
+			}
+		}
+		if(!alreadyQuery(topTerms[topTerms.length - 1]) && j < 2)
+			augment += topTerms[topTerms.length - 1]; 
+
+		return augment;
 	}
 
+
+
+	private String[] findTopKterms() {
+
+		/*		ArrayList<String> keys = new ArrayList<String>();
+		ArrayList<Double> values = new ArrayList<Double>();
+
+		for(String d : q_vect.keySet()) {
+			values.add(q_vect.get(d));
+			keys.add(d);
+		}
+
+		Collections.sort(values);
+
+		String[] array = new String[values.size()];
+		for(int i = 0; i < keys.size(); i++) {
+			int index = findIndex(values.get(i), values);
+			array[index] = keys.get(i); 
+		} */
+
+
+		String[] array = new String[2];
+		String top = "";
+		String second = "";
+		double top_v = 0;
+		double second_v = 0; 
+
+		for(String s : q_vect.keySet()) {
+			if(q_vect.get(s) > top_v) {
+				top = s; 
+				top_v = q_vect.get(s);
+			}
+		}
+
+		for(String s : q_vect.keySet()) {
+			if(q_vect.get(s) > second_v && q_vect.get(s) != top_v) {
+				second = s; 
+				second_v = q_vect.get(s);
+			}
+		}
+		array[0] = top;
+		array[1] = second;
+		return array; 
+	}
+
+	private int findIndex(Double d, ArrayList<Double> values) {
+		int index = 0; 
+		for(int i = 0; i < values.size(); i++) {
+			if(values.get(i) == d)
+				index = i; 
+		}
+		return index; 	
+	}
+
+	private boolean alreadyQuery(String term) {
+		for(String s : query.split(" "))
+			if(s.equals(term)) return true; 
+		return false;
+	}
+
+	private void addTermsToQVect() {
+		for(int i = 0; i < relDoc.size(); i++) {
+			for(String s : relDoc.get(i).split(" ")) {
+				s = s.toLowerCase().trim().replaceAll("[^\\p{L}\\p{N}]", "");
+				if(!s.equals("")) {  //and not one of the stop words 
+					if(invListRel.containsKey(s)) {
+						int w = invListRel.get(s); 
+						invListRel.put(s, w+1);
+						q_vect.put(s, 0.0);
+					}						
+					else {
+						q_vect.put(s, 0.0);
+						invListRel.put(s, 1);
+					}
+				}	
+			}
+		}
+
+		for(int i = 0; i < nonRelDoc.size(); i++) {
+			for(String s : nonRelDoc.get(i).split(" ")) {
+				s = s.toLowerCase().trim().replaceAll("[^\\p{L}\\p{N}]", "");
+				if(!s.equals("")) {  //and not one of the stop words 
+					if(invListNonRel.containsKey(s)) {
+						int w = invListNonRel.get(s); 
+						invListNonRel.put(s, w+1);
+						q_vect.put(s, 0.0);
+					}						
+					else {
+						q_vect.put(s, 0.0);
+						invListNonRel.put(s, 1);
+					}
+				}
+			}
+		}
+		System.out.println("");
+	}
+
+	private void computeWeightsForOriginalQuery() {
+		for(String s : query.split(" ")) {
+			s = s.toLowerCase().trim().replaceAll("[^\\p{L}\\p{N}]", "");
+			if(!s.equals("")) { //and not one of the stop words
+				int w = 0; 
+				if(invListRel.containsKey(s))
+					w += invListRel.get(s); 			
+				if(invListNonRel.containsKey(s))
+					w += invListNonRel.get(s);
+				if(w != 0)
+					q_vect.put(s, Math.log10(10.0 / w));
+			}
+		}
+	}
+
+	private void computeWeightsForQvect() {
+		for(String s : q_vect.keySet()) {
+			double w = q_vect.get(s); 
+			w += BETA / (relDoc.size()) * containsTerm(s, invListRel);
+			w += GAMMA / (nonRelDoc.size()) * containsTerm(s, invListNonRel);
+			q_vect.put(s, w);	
+		}
+	}
+
+	private int containsTerm(String term, HashMap<String, Integer> docs) {
+		if(docs.containsKey(term)) return docs.get(term);
+		else return 0;
+	}
 }

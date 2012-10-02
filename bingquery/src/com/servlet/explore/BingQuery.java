@@ -327,6 +327,7 @@ public class BingQuery {
 		}
 	}
 
+	/*
 	private void computeWeightsForQvect() {
 		for(String s : q_vect.keySet()) {
 			double w = q_vect.get(s); 
@@ -335,7 +336,32 @@ public class BingQuery {
 			q_vect.put(s, w);	
 		}
 	}
-
+	*/
+	private void computeWeightsForQvect() {
+		
+	for (int i=0; i<q_vect.length;i++){
+		for(String candidate; q_vect[i][0]){
+			int n=0;
+			double w = q_vect[i][1];
+			String modQuery = query.toLowerCase().trim().replaceAll("[^A-Za-z]", " ");
+			System.out.println(modQuery);
+			String[] queryArray = modQuery.split("\\s+");
+			double pweight=0;
+			for(String queryTerm : queryArray) {
+				for(int j=0;j<=(q_vect.length-3);j++){
+					if(!candidate.equals(queryTerm)){
+						if ((candidate.equals(q_vect[j][0]) | candidate.equals(q_vect[j+1][0])  | candidate.equals(q_vect[j+2][0])) & (queryTerm.equals((q_vect[j][0])) | queryTerm.equals((q_vect[j+1][0]))  | queryTerm.equals(q_vect[j+2][0])))
+						n=n+1;
+						}
+					}
+				pweight= pweight+(n*w);
+				}			
+			System.out.println(candidate+","+pweight);
+		}
+	}
+	}
+	
+	
 	private int containsTerm(String term, HashMap<String, Integer> docs) {
 		if(docs.containsKey(term)) return docs.get(term);
 		else return 0;
